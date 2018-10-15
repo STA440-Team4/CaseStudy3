@@ -133,7 +133,10 @@ birth_deaths_dropped = birth_deaths %>%
   filter(hisp == 0) %>% 
   select(-race)
 
-birth_deaths_final = rbind(birth_deaths_dropped,birth_deaths_sum)
+#Hispanic needs to be converted to numeric
+birth_deaths_dropped$hisp = as.numeric(birth_deaths_dropped$hisp)
+
+birth_deaths_final = bind_rows(birth_deaths_dropped,birth_deaths_sum)
 
 birth_deaths_final = birth_deaths_final[order(birth_deaths_final$year),]
 
