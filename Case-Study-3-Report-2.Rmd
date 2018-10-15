@@ -1,0 +1,353 @@
+---
+title: "Case Study 3 Interim Report 2"
+date: "10/10/2018"
+author: "Ekim Buyuk (Monitor); Debra Jiang (Coordinator); Katie Tsang (Reproducibility Checker); Steven Yang (Reviewer); Bihan Zhuang (Recorder)"
+geometry: margin=1.2cm
+output: pdf_document
+---
+
+```{r, include=FALSE, warning=FALSE, message=FALSE}
+if (!require("dplyr")) install.packages("dplyr")
+library(dplyr)
+if (!require("readr")) install.packages("readr")
+library(readr)
+if (!require("glmm")) install.packages("glmm")
+library(glmm)
+if (!require("lme4")) install.packages("lme4")
+library(lme4)
+if (!require("brms")) install.packages("brms")
+library(brms)
+if (!require("readr")) install.packages("readr")
+library(readr)
+if (!require("readxl")) install.packages("readxl")
+library(readxl)
+if (!require("maps")) install.packages("maps")
+library(maps)
+if (!require("ggthemes")) install.packages("ggthemes")
+library(ggthemes)
+if (!require("mapproj")) install.packages("mapproj")
+library(mapproj)
+if (!require("tidyverse")) install.packages("tidyverse")
+library(tidyverse)
+if (!require("stringi")) install.packages("stringi")
+library(stringi)
+if (!require("xfun")) install.packages("xfun")
+library(xfun)
+if (!require("knitr")) install.packages("knitr")
+library(knitr)
+if (!require("reshape2")) install.packages("reshape2")
+library(reshape2)
+if (!require("kableExtra")) install.packages("kableExtra")
+library(kableExtra)
+knitr::opts_chunk$set(cache=TRUE, echo=F, warning=F, message=F)
+options(warn = -1)
+```
+
+```{r, include=FALSE}
+# data munging
+data <- read_csv("Yr1116Death.csv")
+Country_Codes <- read_excel("Dataset Descriptions.xls", 
+                            sheet = "County Codes")
+Country_Codes$CORES = as.integer(Country_Codes$CORES)
+colnames(Country_Codes)[colnames(Country_Codes)=="CORES"] <- "cores"
+merged_data<- left_join(Country_Codes,data)
+#Convert first letter to Capital
+firstup <- function(x) {
+  substr(x, 1, 1) <- toupper(substr(x, 1, 1))
+  x
+}
+
+merged_data$COUNTY = stri_trans_totitle(merged_data$COUNTY)
+
+#Categorize Race
+merged_data$race[merged_data$race == 1] = "White"
+merged_data$race[merged_data$race == 2] = "Black or African American"
+merged_data$race[merged_data$race == 3] = "American Indian or Alaska Native"
+merged_data$race[merged_data$race == 4] = "Other"
+
+#Categorize Hispanic Origin
+merged_data$hisp[merged_data$hisp == "C"] = 1
+merged_data$hisp[merged_data$hisp == "M"] = 1
+merged_data$hisp[merged_data$hisp == "N"] = 0
+merged_data$hisp[merged_data$hisp == "O"] = 1
+merged_data$hisp[merged_data$hisp == "P"] = 1
+merged_data$hisp[merged_data$hisp == "S"] = 1
+merged_data$hisp[merged_data$hisp == "U"] = NA
+write.csv(merged_data, "deathdata.csv")
+
+#Clean Death Data
+new_data = merged_data %>%
+  filter(year == 2015) %>%
+  group_by(cores,race,hisp) %>%
+  count()
+
+#Clean Birth Data
+Yr1116Birth = read_csv("Yr1116Birth.csv")
+birth_data = Yr1116Birth %>%
+  filter(YOB == 2015)
+
+birth_data$MRACER[birth_data$MRACER == 0] = "Other"
+birth_data$MRACER[birth_data$MRACER == 1] = "White"
+birth_data$MRACER[birth_data$MRACER == 2] = "Black or African American"
+birth_data$MRACER[birth_data$MRACER == 3] = "American Indian or Alaska Native"
+birth_data$MRACER[birth_data$MRACER == 4] = "Other"
+birth_data$MRACER[birth_data$MRACER == 5] = "Other"
+birth_data$MRACER[birth_data$MRACER == 6] = "Other"
+birth_data$MRACER[birth_data$MRACER == 7] = "Other"
+birth_data$MRACER[birth_data$MRACER == 8] = "Other"
+
+birth_data$MHISP[birth_data$MHISP == "C"] = 1
+birth_data$MHISP[birth_data$MHISP == "M"] = 1
+birth_data$MHISP[birth_data$MHISP == "N"] = 0
+birth_data$MHISP[birth_data$MHISP == "O"] = 1
+birth_data$MHISP[birth_data$MHISP == "P"] = 1
+birth_data$MHISP[birth_data$MHISP == "S"] = 1
+birth_data$MHISP[birth_data$MHISP == "U"] = NA
+
+birth_data = birth_data %>%
+  group_by(CORES, MRACER, MHISP) %>%
+  count()
+
+colnames(new_data)[colnames(new_data) == "n"] <- "Total_Deaths"
+
+colnames(birth_data)[colnames(birth_data) == "CORES"] <- "cores"
+colnames(birth_data)[colnames(birth_data) == "MRACER"] <- "race"
+colnames(birth_data)[colnames(birth_data) == "MHISP"] <- "hisp"
+
+birth_deaths <- merge(birth_data, new_data, by = c("cores", "race","hisp"), all.x=TRUE)
+
+## There's no way to differentiate b/w no deaths & missing information; so, we're assuming that all data not represented in deaths data is 0, rather than missing.
+
+birth_deaths$Total_Deaths[is.na(birth_deaths$Total_Deaths)] = 0
+
+birth_deaths = birth_deaths %>%
+  mutate(Total_Survive = n - Total_Deaths)
+
+##Adding new column with levels that correspond to chart
+
+birth_deaths = birth_deaths %>%
+  mutate(levels = ifelse(hisp == 0, paste("Non-Hispanic", as.character(race)), paste("Hispanic",as.character(race))))
+
+#Select only hispanics
+birth_deaths_test = birth_deaths %>%
+  filter(hisp == 1)
+
+#Sum together deaths and survival for hispanics for each county
+birth_deaths_sum = birth_deaths_test %>%
+  group_by(cores) %>%
+  summarize(n = sum(n), Total_Deaths = sum(Total_Deaths), Total_Survive = sum(Total_Survive))
+
+#Add hispanic columns
+birth_deaths_sum  = birth_deaths_sum %>%
+  mutate(levels = "Hispanic") %>%
+  mutate(hisp = 1)
+
+#Drop race column and filter for non-hispanics
+birth_deaths_dropped = birth_deaths %>%
+  select(-c(race)) %>%
+  filter(hisp == 0)
+
+birth_deaths_final = rbind(birth_deaths_dropped, birth_deaths_sum)
+
+birth_deaths_final = birth_deaths_final[order(birth_deaths_final$cores),]
+
+set_rescor(rescor = FALSE)
+
+#final_data <- read.csv(file = "birth_deaths_final.csv", sep = ",")
+final_data <- birth_deaths_final
+```
+
+
+```{r}
+# modeling
+
+if (file.exists("MGbrm.RData")) {
+  load("MGbrm.RData")
+} else {
+  # fixed effect for levels, random effect for county
+  MGbrm = brm(Total_Deaths | trials(n) ~ levels + (1|cores), data = final_data, family = binomial)
+  save(MGbrm, "MGbrm.RData")
+}
+```
+
+```{r}
+# MGbrm2 = brm(Total_Deaths | trials(n) ~ (1|hisp) + (1|race) + (1|cores), data = birth_deaths, family = binomial)
+# 
+# MGbrm3 = brm(Total_Deaths | trials(n) ~ levels + (1+levels|cores), data = final_data, family = binomial)
+MGbrm4 = brm(Total_Deaths | trials(n) ~ (1+levels|cores), data = final_data, family = binomial)
+
+MGbrm5 = brm(Total_Deaths | trials(n) ~ levels + (1|cores), data = final_data, family = binomial,iter=10)
+
+prediction5 <- posterior_predict(MGbrm5,nsamples=5)
+prediction5 <- predict(MGbrm5,nsamples=5)
+
+# predictions
+predictions1 <- predict(MGbrm, type="response")
+predictions1 <- data.frame(predictions1)
+predictions1$predicted_rate = predictions1$Estimate/final_data$n
+plot(predictions1$Estimate, col = "red")
+points(final_data$Total_Deaths, col = "blue")
+
+final_table <- data.frame(cbind(final_data, predictions1))
+final_table <- final_table[order(final_table$levels),]
+final_table <- left_join(Country_Codes, final_table)
+final_table$actual_rate <- final_table$Total_Deaths/final_table$n
+final_table$predicted_count=NULL
+
+# predictions2 <- predict(MGbrm2, type="response")
+# predictions2$predicted_rate = predictions2$Estimate/final_data$n
+# plot(predictions2$Estimate)
+# 
+# predictions3 <- predict(MGbrm3, type="response")
+# predictions3 <- data.frame(predictions3)
+# par(mfrow=c(1,2))
+# plot(predictions1$Estimate, col = "red")
+# points(final_data$Total_Deaths, col = "blue")
+# plot(predictions3$Estimate, col = "red")
+# points(final_data$Total_Deaths, col = "blue")
+# 
+# predictions4 <- predict(MGbrm4, type="response")
+# predictions4 <- data.frame(predictions4)
+# predictions4$predicted_rate = predictions4$Estimate/final_data$n
+# par(mfrow=c(1,2))
+# plot(predictions1$Estimate, col = "red")
+# points(final_data$Total_Deaths, col = "blue")
+# plot(predictions4$Estimate, col = "red")
+# points(final_data$Total_Deaths, col = "blue")
+# 
+# final_table2 <- data.frame(cbind(final_data, predictions4))
+# final_table2 <- final_table2[order(final_table2$levels),]
+# final_table2 <- left_join(Country_Codes, final_table2)
+# final_table2$actual_rate <- final_table2$Total_Deaths/final_table2$n
+# final_table2$predicted_count=NULL
+
+#final_data<- left_join(Country_Codes,final_data)
+
+```
+
+# Hierarchical Model
+
+Before we began modeling, we had to merge the infant birth and death data sets. In merging, we made the assumption that demographics represented were for the mother, not the baby, so that we could match the data counts. We decided to merge the data by matching the death data to the rows in the birth data. Had we merged in the other direction, we would have lost data, since only counties in which infant deaths existed were included in our data frame. We assumed that if a category was not represented in the death data, then that meant that infant deaths were zero, as opposed to treating it like missing data.
+
+Next, we looked at variation of births and deaths across counties. There were large differences between observed infant mortality rates. For example, in county 18, there were 1143 total births and 10 deaths for white non-Hispanic babies, yielding a 0.87% sample infant mortality for this category.  However, in county 31, there were 278 total births and 7 total deaths for white non-Hispanic babies, yielding a 2.52% sample infant mortality. In cases in which there are just one or two births in a subgroup, these rates can compute as low as 0% or as high as 100%.
+
+Therefore, since we were analyzing observational data, and the number of mothers in each category is not the same in each county, the rates vary largely, as well. We would suspect that there is some correlation between infant mortality and race as well as ethnic groups across counties. Thus, we coul look at multi-level modeling to account for this intuitive clustering of the data.
+
+## Treatment of Data
+
+Next, we need to consider what form the data should take for our analysis. Because we are concerned with the categories outlined in the SCHS table, we grouped based on county, race and ethnicity in order to explore the influences of each demographic in each county, recognizing that they could be different. We decided to create a single column to comprehensively represent race and Hispanic origin, with the following five levels: Non-Hispanic White, Non-Hispanic African American, Non-Hispanic American Indian, Non-Hispanic Other, and Hispanic. This required treating all of the Hispanic groups as one group altogether. This is not necessarily a good idea, as we saw a lot of variation between each of the Hispanic groups themselves, but our task was to recreate the chart so we proceeded keeping this in mind. We also decided that because the number of mothers varied so much between the subgroups, it would be more beneficial to treat this data as binomial, in which the binomial(n, p) translates to binomial(number of births, probability of infant mortality).  
+
+## Model Selection
+
+We ultimately decided to use a Bayesian logistic multi-level model with a binomial family distribution to analyze our data. The multi-level model accounted for clustering in our data across counties and demographic groups and we used logistic regression and analyzed the data through a binomial family distribution. We initially tried to regress a logistic model on total deaths and total survived births, trying fixed, random effects models for each of the variables. We had some issues with convergence due to small sample size in some categories, and because there was such a high number of categories, the frequentist model was not entirely reliable, specifically in accounting for uncertainty in variance. We instead switched to using a Bayesian Model, which considers our information better. We analyzed random effects across counties, because we assumed that we could partially pool between counties for the sake of compensating for the lack of births in some counties.
+
+```{r}
+final_table_select_predicted_rate = final_table %>%
+  select(COUNTY, levels, predicted_rate)
+
+final_table_select_predicted_county = final_table %>%
+  select(COUNTY, levels, Estimate)
+  
+predictedratetable = dcast(final_table_select_predicted_rate, COUNTY ~ levels)
+colnames(predictedratetable) = c("COUNTY", "Hispanic Infant Death Rate", "Non-Hispanic American Indian or Alaska Native Infant Death Rate", "Non-Hispanic Black or African American Infant Death Rate", "Non-Hispanic Other Infant Death Rate", "Non-Hispanic White Infant Death Rate")
+
+#Multiple rates by 1000 to get per 1000 rate
+predictedratetable[,2:6] = predictedratetable[,2:6] * 1000
+
+#Round to nearest to tenths
+predictedratetable = predictedratetable %>%
+  mutate_at(2:6, round, 1)
+
+
+predictedcounttable = dcast(final_table_select_predicted_county, COUNTY ~ levels)
+colnames(predictedcounttable) = c("COUNTY", "Hispanic Infant Deaths", "Non-Hispanic American Indian or Alaska Native Infant Deaths", "Non-Hispanic Black or African American Infant Deaths", "Non-Hispanic Other Infant Deaths", "Non-Hispanic White Infant Deaths")
+
+#Round infant deaths to nearest whole number
+
+predictedcounttable = predictedcounttable %>%
+  mutate_at(2:6, round, 0)
+
+#Merge rate and count tables
+predictiontable = merge(predictedratetable, predictedcounttable, by = "COUNTY")
+
+#Reorder columns (FINAL TABLE)
+predictiontable = predictiontable[, order(names(predictiontable))]
+predictiontable[is.na(predictiontable)] = 0
+
+#Kable table
+predictiontable %>% 
+  kable("latex", digits = 2, booktabs = T, longtable = T) %>% 
+  column_spec(2:13, width = "16mm") %>% 
+  kable_styling(font_size = 10, latex_options = "striped") %>% 
+  kableExtra::landscape()
+```
+
+```{r}
+# plot map
+final_rate_by_county <- final_table %>% 
+  group_by(COUNTY) %>% 
+  summarize(county_n = sum(n), county_estimate = sum(Estimate)) %>% 
+  mutate(county_rate = county_estimate / county_n * 1000)
+
+counties = map_data("county", region="north carolina")
+counties$COUNTY = toupper(counties$subregion)
+final_rate_by_county$COUNTY = toupper(final_rate_by_county$COUNTY)
+test <- left_join(final_rate_by_county, counties, by = "COUNTY")
+  
+ggplot(data = test, aes(x = long, y = lat, group = COUNTY, fill = county_rate)) +
+  geom_polygon() +
+  coord_fixed(1.3) +
+  theme_map() +
+  ggtitle("Predicted Infant Mortality Rate by County, 2015") +
+  scale_fill_continuous(high = "#132B43", low = "#56B1F7")
+```
+
+
+# Description of Findings
+
+After testing various models, our final Bayesian Model predicted total infant mortality rates using race, ethnicity and a random effect for county, in order to account for any potential spatial correlation. We considered using a random effect for ethnicity and race but given there was a low number of levels for each of these variables, and the model was more complex but not significantly better at predicting, we ultimately decided against this. 
+
+Based on the summary of our model, we can interpret how different races have different odds of death, when all other characteristics are held equal. For example, if we refer to the level for Non Hispanic Black or African American, and compare this to the Hispanic group (our baseline), the baby of the Black or African American group is e^0.84 (95% confidence interval: e^0.40, e^-1.10), or 2.316x (95% confidence interval: 0.33x, 1.49x) more likely to die, holding all other characteristics equal. This is the only variable in our prediction we found significant. 
+
+Next, we generated predictions of the Bayesian model and plotted the estimated counts of death against the actual death counts. Overall the number of deaths were below 20 and the general trend of estimated and actual values were similar, indicating that our model was able to predict reasonable estimates. 
+
+```{r, echo=FALSE}
+plot(predictions1$Estimate, main="Bayesian Model Predictions",
+     xlab="Index", ylab="Infant Mortality Rate", col="red", pch=18)
+points(final_data$Total_Deaths, col = "blue", pch=18)
+```
+
+Based on these estimates, we calculated the predicted infant mortality probability by dividing the estimates of death count by the total number of births in each category. All of these rates ended up being between 0 and 1, as probabilities should be. To obtain the predicted infant mortality rate (which is per 1000 births), we multiplied the probability we obtained by 1000.
+  
+Comparing our estimates with the 2015 North Carolina Infant Mortality Report, the SCHS reported that the Non-Hispanic African American death rates per 1000 live births in Clay and Watauga counties are 1000 and 333.3, respectively. This was due to small counts--1 out of 1 deaths translates to an infant mortality rate to 1000, but we don’t expect that every Non-Hispanic African American baby dies in Clay county. Our prediction shows that Clay and Watauga have rates of 12.3 and 13.7 respectively, and so, we have evidence that our model provides better insight in these cases.
+  
+In addition, for Anson county, the Non-Hispanic Other Rate is 400.0 per 1000 live births because there are only 4 infant deaths in total, and 2 deaths in Non-Hispanic Other race group. Our model predicts that the rate should be 6.8, which is much more realistic.
+  
+Furthermore, for the Non-hispanic American Indian and Non-hispanic others column, we see plenty of zeros in the report, as the total infant deaths for these counties are small. However, utilizing our prediction with a Bayesian approach, we may borrow information from similar counties to predict for these two demographic groups in counties where they do not exist.
+  
+# Report Targeted at SCHS
+
+We believe that our approach, which employs a Bayesian multi-level framework using the binomial distribution, is more robust than the SCHS method of calculating infant mortality rates. The SCHS method of dividing raw infant death count by raw birth count does not account for discrepancy between the reliability of the data translated from raw counts to rates, due to variant data counts. We will first discuss why a multi-level model approach is more robust. We will then explain the motivation behind using a binomial distribution as well as a Bayesian framework, and finally, we will offer suggestions for future improvement in modeling infant mortality rates.
+ 
+Firstly, the multi-level model approach essentially finds a happy medium between pooling and not pooling observations. Pooling observations suggests that one should, in the case of our data set, give all the counties in North Carolina an equal weight when predicting infant mortalities. Averaging the death rates of all of the counties to get estimates ignores potentially significant and meaningful variation across the counties. Not pooling observations suggests that one should consider each county separately, which would mean simply averaging the death levels in each specific county. However, this can over-fit the data within each county, again failing to capture information from all of the data. Multi-level modeling, on the other hand, uses a weighted average based on the information available at each level. For example, for counties with smaller sample sizes, where information is less precise, the weighting would shrink the multilevel estimates closer to the overall state average. Averages from counties with larger sample sizes are arguably more precise, and so the multilevel estimates in these areas would be closer to the county averages. As expected, in intermediate cases, the multilevel estimate would be in between the extremes. Thus, this approach is much more robust in utilizing all of the data available to make predictions.
+	
+Furthermore, we argue that the binomial distribution is the best method of predicting infant mortality. Binomial distribution represents counts of “successes” out of a certain number of “trials”. In this case, an infant birth is considered a “trial”, and an infant death is (rather morbidly) considered a “success”. We chose this binomial because other distributions that account for rates rather than counts, like the Poisson distribution, would not sufficiently account for disparity in counts between different groups. A count of 1 out of 1 deaths would translate to a flat 100%, and would hold as much weight as a count of 5 out of 2074, which translates to a 0.24% infant mortality rate. This would wreak havoc in a model that assumes constant variance among the data.
+	
+After deciding on a binomial distribution, we had to decide on whether to take a Bayesian or frequentist approach. Typically, the Bayesian approach is preferable when there is uncertainty in the data, since it can better quantify this uncertainty by utilizing a prior and updating our information about the parameter(s) of interest based on observed data. In this case, our data has a large number of categories, some of which contain little to no data--that is to say, we are not completely certain that the data is representative of the true distribution of infant mortality in each category. Therefore, we chose to use a Bayesian Model.
+
+```{r, include = FALSE}
+#The GLMER Model As a Comparison:
+MG1 = glmer(cbind(Total_Deaths,Total_Survive) ~ levels + (1|cores), data = final_table, family = binomial)
+MG1_predict = as_data_frame(predict(MG1, type = "response"))
+MG1_predict$count = MG1_predict$value*1000
+plotglm = plot(MG1_predict$count, main="GLMER Model Predictions",
+    xlab="Index", ylab="Infant Mortality Rate", col="red", pch=18)
+```
+
+```{r, echo=FALSE}
+plot(MG1_predict$count, main="GLMER Model Predictions",
+     xlab="Index", ylab="Infant Mortality Rate", col="red", pch=18)
+```
+
+Moving forward, we find there are still significant steps that can be taken to improve these estimates in the future. First of all, our preliminary exploratory data analysis revealed potential problems in the current method of categorizing the ethnicities. It does not make sense to group the different Hispanic groups together under Hispanic as these groups do vary significantly in infant mortality rates. Similarly, it does not make sense why Non-Hispanic “Other” is grouped together. Though we recognize that there may be smaller sample sizes within smaller categories, grouping in what ends up being an arbitrary manner given the differences across the groups, is not a robust way of addressing this problem. Rather, we would suggest using the tools we have outlined here, and considering using more data from other states to support this research. 
+

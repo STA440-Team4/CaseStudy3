@@ -1,0 +1,212 @@
+---
+title: "Case Study 3 Final Report"
+date: "10/10/2018"
+author: "Ekim Buyuk (Monitor); Debra Jiang (Coordinator); Katie Tsang (Reproducibility Checker); Steven Yang (Reviewer); Bihan Zhuang (Recorder)"
+geometry: margin=1.2cm
+output: pdf_document
+---
+
+```{r, include=FALSE, warning=FALSE, message=FALSE}
+if (!require("dplyr")) install.packages("dplyr")
+library(dplyr)
+if (!require("readr")) install.packages("readr")
+library(readr)
+if (!require("glmm")) install.packages("glmm")
+library(glmm)
+if (!require("lme4")) install.packages("lme4")
+library(lme4)
+if (!require("brms")) install.packages("brms")
+library(brms)
+if (!require("readr")) install.packages("readr")
+library(readr)
+if (!require("readxl")) install.packages("readxl")
+library(readxl)
+if (!require("maps")) install.packages("maps")
+library(maps)
+if (!require("ggthemes")) install.packages("ggthemes")
+library(ggthemes)
+if (!require("mapproj")) install.packages("mapproj")
+library(mapproj)
+if (!require("tidyverse")) install.packages("tidyverse")
+library(tidyverse)
+if (!require("stringi")) install.packages("stringi")
+library(stringi)
+if (!require("xfun")) install.packages("xfun")
+library(xfun)
+if (!require("knitr")) install.packages("knitr")
+library(knitr)
+if (!require("reshape2")) install.packages("reshape2")
+library(reshape2)
+if (!require("kableExtra")) install.packages("kableExtra")
+library(kableExtra)
+knitr::opts_chunk$set(cache=TRUE, echo=F, warning=F, message=F)
+options(warn = -1)
+```
+
+```{r, include=FALSE, warning=FALSE, message=FALSE}
+# Data munging
+# needs to be redone since we are incorporating all years
+data <- read_csv("Yr1116Death.csv")
+Country_Codes <- read_excel("Dataset Descriptions.xls", 
+                            sheet = "County Codes")
+Country_Codes$CORES = as.integer(Country_Codes$CORES)
+colnames(Country_Codes)[colnames(Country_Codes)=="CORES"] <- "cores"
+merged_data<- left_join(Country_Codes,data)
+#Convert first letter to Capital
+firstup <- function(x) {
+  substr(x, 1, 1) <- toupper(substr(x, 1, 1))
+  x
+}
+
+merged_data$COUNTY = stri_trans_totitle(merged_data$COUNTY)
+
+#Categorize Race
+merged_data$race[merged_data$race == 1] = "White"
+merged_data$race[merged_data$race == 2] = "Black or African American"
+merged_data$race[merged_data$race == 3] = "American Indian or Alaska Native"
+merged_data$race[merged_data$race == 4] = "Other"
+
+#Categorize Hispanic Origin
+merged_data$hisp[merged_data$hisp == "C"] = 1
+merged_data$hisp[merged_data$hisp == "M"] = 1
+merged_data$hisp[merged_data$hisp == "N"] = 0
+merged_data$hisp[merged_data$hisp == "O"] = 1
+merged_data$hisp[merged_data$hisp == "P"] = 1
+merged_data$hisp[merged_data$hisp == "S"] = 1
+merged_data$hisp[merged_data$hisp == "U"] = NA
+write.csv(merged_data, "deathdata.csv")
+
+#Clean Death Data
+new_data = merged_data %>%
+  group_by(year,cores,race,hisp) %>%
+  count()
+
+#Clean Birth Data
+birth_data = read_csv("Yr1116Birth.csv")
+
+birth_data$MRACER[birth_data$MRACER == 0] = "Other"
+birth_data$MRACER[birth_data$MRACER == 1] = "White"
+birth_data$MRACER[birth_data$MRACER == 2] = "Black or African American"
+birth_data$MRACER[birth_data$MRACER == 3] = "American Indian or Alaska Native"
+birth_data$MRACER[birth_data$MRACER == 4] = "Other"
+birth_data$MRACER[birth_data$MRACER == 5] = "Other"
+birth_data$MRACER[birth_data$MRACER == 6] = "Other"
+birth_data$MRACER[birth_data$MRACER == 7] = "Other"
+birth_data$MRACER[birth_data$MRACER == 8] = "Other"
+
+birth_data$MHISP[birth_data$MHISP == "C"] = 1
+birth_data$MHISP[birth_data$MHISP == "M"] = 1
+birth_data$MHISP[birth_data$MHISP == "N"] = 0
+birth_data$MHISP[birth_data$MHISP == "O"] = 1
+birth_data$MHISP[birth_data$MHISP == "P"] = 1
+birth_data$MHISP[birth_data$MHISP == "S"] = 1
+birth_data$MHISP[birth_data$MHISP == "U"] = NA
+
+birth_data = birth_data %>%
+  group_by(YOB, CORES, MRACER, MHISP) %>%
+  count()
+
+colnames(new_data)[colnames(new_data) == "n"] <- "Total_Deaths"
+colnames(birth_data)[colnames(birth_data) == "CORES"] <- "cores"
+colnames(birth_data)[colnames(birth_data) == "MRACER"] <- "race"
+colnames(birth_data)[colnames(birth_data) == "MHISP"] <- "hisp"
+colnames(birth_data)[colnames(birth_data) == "YOB"] <- "year"
+
+birth_deaths <- merge(birth_data, new_data, by = c("year", "cores", "race","hisp"), all.x=TRUE)
+
+## There's no way to differentiate b/w no deaths & missing information; so, we're assuming that all data not represented in deaths data is 0, rather than missing.
+
+birth_deaths$Total_Deaths[is.na(birth_deaths$Total_Deaths)] = 0
+
+birth_deaths = birth_deaths %>%
+  mutate(Total_Survive = n - Total_Deaths) %>% 
+  mutate(levels = ifelse(hisp == 0, paste("Non-Hispanic", as.character(race)), paste("Hispanic",as.character(race))))
+
+#Sum together deaths and survival for hispanics for each county
+birth_deaths_sum = birth_deaths %>%
+  filter(hisp == 1) %>%
+  group_by(year, cores) %>%
+  summarize(levels = "Hispanic", hisp = 1, n = sum(n), Total_Deaths = sum(Total_Deaths), Total_Survive = sum(Total_Survive))
+
+#Drop race column and filter for non-hispanics
+birth_deaths_dropped = birth_deaths %>%
+  filter(hisp == 0) %>% 
+  select(-race)
+
+birth_deaths_final = rbind(birth_deaths_dropped,birth_deaths_sum)
+
+birth_deaths_final = birth_deaths_final[order(birth_deaths_final$year),]
+
+set_rescor(rescor = FALSE)
+
+final_data <- birth_deaths_final
+```
+
+
+```{r}
+# Modeling
+
+# Make a new data frame with total birth equal to 1000 
+# Use this in our predict function
+new_df <- final_data %>% select(cores, hisp, levels) %>% mutate(n = 1000)
+final_data <- final_data %>% mutate(death_rate = Total_Deaths * 1000 / n)
+
+# Function to generate predictions and 
+diagnostics <- function(model) {
+  pred <- data.frame(predict(model, newdata = new_df))
+  plot(pred$Estimate, final_data$death_rate, main="Predicted vs. Actual")
+  #points(final_data$Total_Deaths, col = "blue", pch=18)
+  plot(pred$Estimate, main="Bayesian Model Predictions",
+     xlab="Index", ylab="Infant Mortality Rate", col="red", pch=18)
+  points(final_data$death_rate, col = "blue", pch=18)
+}
+```
+
+```{r}
+# fixed effect for levels, random effect for county
+if (file.exists("MGbrm.RData")) {
+  load("MGbrm.RData")
+} else {
+  MGbrm = brm(Total_Deaths | trials(n) ~ levels + (1|cores), data = final_data, family = binomial)
+  save(MGbrm, file = "MGbrm.RData")
+}
+
+diagnostics(MGbrm)
+```
+
+```{r}
+# random effect for levels, random effect for county
+if (file.exists("MGbrm2.RData")) {
+  load("MGbrm2.RData")
+} else {
+  MGbrm2 = brm(Total_Deaths | trials(n) ~ (1|levels) + (1|cores), data = final_data, family = binomial)
+  save(MGbrm2, file = "MGbrm2.RData")
+}
+
+diagnostics(MGbrm2)
+```
+
+```{r}
+# random effect for levels, random effect for county
+if (file.exists("MGbrm3.RData")) {
+  load("MGbrm3.RData")
+} else {
+  MGbrm3 = brm(Total_Deaths | trials(n) ~ (1|levels) + (1|cores) + year, data = final_data, family = binomial)
+  save(MGbrm3, file = "MGbrm3.RData")
+}
+
+diagnostics(MGbrm3)
+```
+
+```{r}
+# random effect for levels, random effect for county
+if (file.exists("MGbrm4.RData")) {
+  load("MGbrm4.RData")
+} else {
+  MGbrm4 = brm(Total_Deaths | trials(n) ~ (1|levels) + (1|cores) + year + year * levels, data = final_data, family = binomial)
+  save(MGbrm4, file = "MGbrm4.RData")
+}
+
+diagnostics(MGbrm4)
+```
+
